@@ -1,3 +1,3 @@
-# SaaS Factory: Produtos variados
+# SaaS Factory: produtos variados
 
-Gerado automaticamente para o nicho Produtos variados.
+Gerado automaticamente para o nicho produtos variados.

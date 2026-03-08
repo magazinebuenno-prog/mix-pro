@@ -1,1 +1,19 @@
-CREATE TABLE IF NOT EXISTS products (id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), name TEXT NOT NULL, price DECIMAL(10,2) NOT NULL, category TEXT, desc TEXT, images TEXT[] DEFAULT '{}', stock BOOLEAN DEFAULT TRUE, code TEXT); CREATE TABLE IF NOT EXISTS categories (id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name TEXT UNIQUE NOT NULL); CREATE TABLE IF NOT EXISTS staff (id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, full_name TEXT NOT NULL, login TEXT UNIQUE NOT NULL);
+CREATE TABLE products (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  price NUMERIC(10,2) NOT NULL,
+  category TEXT DEFAULT 'Geral',
+  description TEXT,
+  image_url TEXT,
+  images TEXT[], -- Para suporte múltiplo
+  code TEXT,
+  stock BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE categories (
+  id SERIAL PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL
+);
+
+INSERT INTO categories (name) VALUES ('Utilidades'), ('Eletrônicos'), ('Cozinha'), ('Presentes');
