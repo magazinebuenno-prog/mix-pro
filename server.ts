@@ -44,22 +44,21 @@ try {
   // Coluna já existe ou outro erro ignorável
 }
 
-// Prompt de Especialista em Migração (V3 - Fidelidade de Dados)
-const defaultPrompt = `Você é um Especialista em Migração Cirúrgica de Código.
-OBJETIVO: Migrar o TEMPLATE BASE para o nicho "{{niche}}" garantindo que o fluxo de dados do Supabase seja idêntico ao localStorage original.
+// Prompt de Especialista em Migração (V4 - Netlify Ready)
+const defaultPrompt = `Você é um Especialista em Deploy no Netlify e Migração de Código.
+OBJETIVO: Migrar o TEMPLATE BASE para o nicho "{{niche}}" gerando um pacote pronto para hospedagem profissional no Netlify.
 
-REGRAS DE OURO (NÃO NEGOCIÁVEIS):
-1. COMPATIBILIDADE DE DADOS: 
-   - Se o código original usa "categories" como um array de strings (ex: ['A', 'B']), você DEVE mapear o retorno do Supabase: "categories = data.map(c => c.name)".
-   - Garanta que as funções "renderAdmin()" e "renderProducts()" recebam os dados exatamente no formato que esperavam originalmente.
-2. SINCRONISMO DE CATEGORIAS:
-   - A função "addCategory" deve: 1. Salvar no Supabase -> 2. Buscar lista nova -> 3. Atualizar a variável global -> 4. Chamar renderAdmin() para reconstruir o <select>.
-   - O campo <select id="new-p-cat"> deve ser limpo e preenchido com as novas categorias imediatamente.
-3. PRESERVAÇÃO DE UI: Não altere nenhuma classe Tailwind, ID ou estrutura de Modal. Mantenha o Carrossel e o Zoom intactos.
-4. SQL SCHEMA: Crie a tabela "categories" com a coluna "name" (TEXT) e a tabela "products" com as colunas exatas do seu JS (name, price, category, desc, images, code, stock).
+ESTRUTURA DO PACOTE (OBRIGATÓRIO):
+1. index.html (LANDING PAGE): Crie uma página de vendas de alta conversão para o nicho "{{niche}}". Ela deve ter um botão "Acessar Sistema" que leva para "app.html".
+2. app.html (SISTEMA): Este deve ser o seu CÓDIGO ORIGINAL adaptado. Mantenha 100% da UI, Carrossel, Zoom e Admin. Substitua o localStorage pelo Supabase ({{supabase_url}}, {{supabase_key}}).
+3. netlify.toml: Gere este arquivo com as regras de redirecionamento para garantir que não existam erros 404.
 
-SAÍDA: JSON com index_html, landing_html, supabase_sql, netlify_toml.
-AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração falhou.`;
+REGRAS DE DADOS:
+- Mapeie os dados do Supabase para o formato de array do seu JS original: "data.map(item => item.name)".
+- Garanta que o Admin funcione perfeitamente com as tabelas "products", "categories" e "staff".
+
+SAÍDA: JSON com index_html (landing), app_html (sistema), supabase_sql, netlify_toml.
+AVISO: O sistema deve ser "Plug and Play". O usuário deve apenas subir o ZIP no Netlify e tudo deve funcionar.`;
 
 const stmt = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 stmt.run("system_prompt", defaultPrompt);

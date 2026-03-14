@@ -11,6 +11,8 @@ import {
   Globe, 
   Code,
   Download,
+  Upload,
+  X,
   CheckCircle2,
   AlertCircle,
   Loader2
@@ -68,39 +70,93 @@ export default function App() {
   });
 
   const [generations, setGenerations] = useState<any[]>([]);
+  const [isStaticMode, setIsStaticMode] = useState(false);
+  const [showDeployGuide, setShowDeployGuide] = useState(false);
 
   useEffect(() => {
-    fetchTemplates();
-    fetchSettings();
-    fetchGenerations();
+    const init = async () => {
+      try {
+        await fetchTemplates();
+        await fetchSettings();
+        await fetchGenerations();
+      } catch (error) {
+        console.warn("Backend não detectado ou erro na conexão. Ativando Modo Estático (LocalStorage).");
+        setIsStaticMode(true);
+        loadFromLocalStorage();
+      }
+    };
     
-    // Polling para atualizar dashboard
-    const interval = setInterval(fetchGenerations, 5000);
+    init();
+    
+    // Polling para atualizar dashboard (apenas se não for estático)
+    const interval = setInterval(async () => {
+      if (!isStaticMode) {
+        try {
+          await fetchGenerations();
+        } catch (e) {
+          // Silently fail polling if backend disappears
+          console.debug("Polling failed, backend might be offline");
+        }
+      }
+    }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isStaticMode]);
 
-  const fetchTemplates = async () => {
-    const res = await fetch("/api/templates");
-    const data = await res.json();
-    setTemplates(data);
-  };
-
-  const fetchSettings = async () => {
-    const res = await fetch("/api/settings");
-    const data = await res.json();
-    setSettings(data);
-    // Auto-fill factory config if settings exist
+  const loadFromLocalStorage = () => {
+    const localTemplates = JSON.parse(localStorage.getItem("factory_templates") || "[]");
+    const localSettings = JSON.parse(localStorage.getItem("factory_settings") || "{}");
+    const localGens = JSON.parse(localStorage.getItem("factory_generations") || "[]");
+    
+    setTemplates(localTemplates);
+    setSettings(localSettings);
+    setGenerations(localGens);
+    
     setFactoryConfig(prev => ({
       ...prev,
-      supabaseUrl: data.supabase_url || "",
-      supabaseKey: data.supabase_key || ""
+      supabaseUrl: localSettings.supabase_url || "",
+      supabaseKey: localSettings.supabase_key || ""
     }));
   };
 
+  const fetchTemplates = async () => {
+    try {
+      const res = await fetch("/api/templates");
+      if (!res.ok) throw new Error("Status " + res.status);
+      const data = await res.json();
+      setTemplates(data);
+    } catch (error) {
+      console.error("Erro ao buscar templates:", error);
+      throw error;
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Status " + res.status);
+      const data = await res.json();
+      setSettings(data);
+      setFactoryConfig(prev => ({
+        ...prev,
+        supabaseUrl: data.supabase_url || "",
+        supabaseKey: data.supabase_key || ""
+      }));
+    } catch (error) {
+      console.error("Erro ao buscar configurações:", error);
+      throw error;
+    }
+  };
+
   const fetchGenerations = async () => {
-    const res = await fetch("/api/generations");
-    const data = await res.json();
-    setGenerations(data);
+    try {
+      const res = await fetch("/api/generations");
+      if (!res.ok) throw new Error("Status " + res.status);
+      const data = await res.json();
+      setGenerations(data);
+    } catch (error) {
+      console.error("Erro ao buscar gerações:", error);
+      throw error;
+    }
   };
 
   const downloadZip = (base64: string, niche: string) => {
@@ -113,19 +169,45 @@ export default function App() {
   const handleSaveTemplate = async () => {
     if (!newTemplate.name || !newTemplate.content) return;
     setLoading(true);
-    await fetch("/api/templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newTemplate)
-    });
-    setNewTemplate({ name: "", description: "", content: "" });
-    fetchTemplates();
-    setLoading(false);
+    try {
+      if (isStaticMode) {
+        const template = { ...newTemplate, id: Date.now(), created_at: new Date().toISOString() };
+        const updated = [template, ...templates];
+        setTemplates(updated);
+        localStorage.setItem("factory_templates", JSON.stringify(updated));
+      } else {
+        const res = await fetch("/api/templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newTemplate)
+        });
+        if (!res.ok) throw new Error("Falha ao salvar template no servidor");
+        await fetchTemplates();
+      }
+      setNewTemplate({ name: "", description: "", content: "" });
+    } catch (error) {
+      console.error("Erro ao salvar template:", error);
+      alert("Erro ao salvar template. Verifique a conexão.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteTemplate = async (id: number) => {
-    await fetch(`/api/templates/${id}`, { method: "DELETE" });
-    fetchTemplates();
+    try {
+      if (isStaticMode) {
+        const updated = templates.filter(t => t.id !== id);
+        setTemplates(updated);
+        localStorage.setItem("factory_templates", JSON.stringify(updated));
+      } else {
+        const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Falha ao deletar template no servidor");
+        await fetchTemplates();
+      }
+    } catch (error) {
+      console.error("Erro ao deletar template:", error);
+      alert("Erro ao deletar template. Verifique a conexão.");
+    }
   };
 
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -133,12 +215,18 @@ export default function App() {
   const handleSaveSettings = async (key: string, value: string) => {
     setLoading(true);
     try {
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, value })
-      });
-      await fetchSettings();
+      if (isStaticMode) {
+        const updated = { ...settings, [key]: value };
+        setSettings(updated);
+        localStorage.setItem("factory_settings", JSON.stringify(updated));
+      } else {
+        await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value })
+        });
+        await fetchSettings();
+      }
       setSaveStatus(key);
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
@@ -151,49 +239,90 @@ export default function App() {
   const handleSaveAllCredentials = async () => {
     setLoading(true);
     try {
-      await Promise.all([
-        fetch("/api/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: "supabase_url", value: settings.supabase_url })
-        }),
-        fetch("/api/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: "supabase_key", value: settings.supabase_key })
-        })
-      ]);
-      await fetchSettings();
+      if (isStaticMode) {
+        const updated = { ...settings, supabase_url: settings.supabase_url, supabase_key: settings.supabase_key };
+        setSettings(updated);
+        localStorage.setItem("factory_settings", JSON.stringify(updated));
+      } else {
+        await Promise.all([
+          handleSaveSettings("supabase_url", settings.supabase_url || ""),
+          handleSaveSettings("supabase_key", settings.supabase_key || "")
+        ]);
+      }
       setSaveStatus("credentials");
       setTimeout(() => setSaveStatus(null), 3000);
+      alert("Credenciais salvas com sucesso!");
     } catch (error) {
       console.error("Erro ao salvar credenciais:", error);
+      alert("Erro ao salvar credenciais.");
     } finally {
       setLoading(false);
     }
   };
 
+  const exportData = () => {
+    const data = {
+      templates,
+      settings,
+      generations,
+      version: "2.0"
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `saas-factory-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+  };
+
+  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.templates) {
+          setTemplates(data.templates);
+          localStorage.setItem("factory_templates", JSON.stringify(data.templates));
+        }
+        if (data.settings) {
+          setSettings(data.settings);
+          localStorage.setItem("factory_settings", JSON.stringify(data.settings));
+        }
+        if (data.generations) {
+          setGenerations(data.generations);
+          localStorage.setItem("factory_generations", JSON.stringify(data.generations));
+        }
+        alert("Dados importados com sucesso!");
+        window.location.reload();
+      } catch (error) {
+        alert("Erro ao importar arquivo. Formato inválido.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleResetPrompt = async () => {
-    if (!confirm("Deseja resetar para o modo ESPECIALISTA V3? Este modo resolve o erro de categorias vazias e falha no cadastro.")) return;
-    const defaultPrompt = `Você é um Especialista em Migração Cirúrgica de Código.
-OBJETIVO: Migrar o TEMPLATE BASE para o nicho "{{niche}}" garantindo que o fluxo de dados do Supabase seja idêntico ao localStorage original.
+    if (!confirm("Deseja resetar para o modo NETLIFY READY (V4)? Este modo organiza o ZIP para que a Landing Page seja a página principal.")) return;
+    const defaultPrompt = `Você é um Especialista em Deploy no Netlify e Migração de Código.
+OBJETIVO: Migrar o TEMPLATE BASE para o nicho "{{niche}}" gerando um pacote pronto para hospedagem profissional no Netlify.
 
-REGRAS DE OURO (NÃO NEGOCIÁVEIS):
-1. COMPATIBILIDADE DE DADOS: 
-   - Se o código original usa "categories" como um array de strings (ex: ['A', 'B']), você DEVE mapear o retorno do Supabase: "categories = data.map(c => c.name)".
-   - Garanta que as funções "renderAdmin()" e "renderProducts()" recebam os dados exatamente no formato que esperavam originalmente.
-2. SINCRONISMO DE CATEGORIAS:
-   - A função "addCategory" deve: 1. Salvar no Supabase -> 2. Buscar lista nova -> 3. Atualizar a variável global -> 4. Chamar renderAdmin() para reconstruir o <select>.
-   - O campo <select id="new-p-cat"> deve ser limpo e preenchido com as novas categorias imediatamente.
-3. PRESERVAÇÃO DE UI: Não altere nenhuma classe Tailwind, ID ou estrutura de Modal. Mantenha o Carrossel e o Zoom intactos.
-4. SQL SCHEMA: Crie a tabela "categories" com a coluna "name" (TEXT) e a tabela "products" com as colunas exatas do seu JS (name, price, category, desc, images, code, stock).
+ESTRUTURA DO PACOTE (OBRIGATÓRIO):
+1. index.html (LANDING PAGE): Crie uma página de vendas de alta conversão para o nicho "{{niche}}". Ela deve ter um botão "Acessar Sistema" que leva para "app.html".
+2. app.html (SISTEMA): Este deve ser o seu CÓDIGO ORIGINAL adaptado. Mantenha 100% da UI, Carrossel, Zoom e Admin. Substitua o localStorage pelo Supabase ({{supabase_url}}, {{supabase_key}}).
+3. netlify.toml: Gere este arquivo com as regras de redirecionamento para garantir que não existam erros 404.
 
-SAÍDA: JSON com index_html, landing_html, supabase_sql, netlify_toml.
-AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração falhou.`;
+REGRAS DE DADOS:
+- Mapeie os dados do Supabase para o formato de array do seu JS original: "data.map(item => item.name)".
+- Garanta que o Admin funcione perfeitamente com as tabelas "products", "categories" e "staff".
+
+SAÍDA: JSON com index_html (landing), app_html (sistema), supabase_sql, netlify_toml.
+AVISO: O sistema deve ser "Plug and Play". O usuário deve apenas subir o ZIP no Netlify e tudo deve funcionar.`;
     
     setSettings(prev => ({ ...prev, system_prompt: defaultPrompt }));
     await handleSaveSettings("system_prompt", defaultPrompt);
-    alert("🚀 Modo Especialista V3 Ativado! Agora as categorias funcionarão perfeitamente. Salve o prompt e gere novamente.");
+    alert("🚀 Modo Netlify Ready Ativado! O ZIP agora virá com index.html (Landing) e app.html (Sistema).");
   };
 
   const handleStartFactory = async () => {
@@ -212,27 +341,33 @@ AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
     for (const niche of nicheList) {
-      // 1. Criar registro inicial no backend
-      const startRes = await fetch("/api/generations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          niche,
-          template_id: template.id,
-          status: "Processando"
-        })
-      });
-      const { id: generationId } = await startRes.json();
-      fetchGenerations();
-
+      let generationId: any = Date.now();
+      
       try {
+        if (isStaticMode) {
+          const newGen = { id: generationId, niche, template_id: template.id, status: "Processando", created_at: new Date().toISOString() };
+          const updated = [newGen, ...generations];
+          setGenerations(updated);
+          localStorage.setItem("factory_generations", JSON.stringify(updated));
+        } else {
+          const startRes = await fetch("/api/generations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ niche, template_id: template.id, status: "Processando" })
+          });
+          if (!startRes.ok) throw new Error("Falha ao iniciar geração no servidor");
+          const resData = await startRes.json();
+          generationId = resData.id;
+          await fetchGenerations();
+        }
+
         const prompt = settings.system_prompt
           .replace("{{niche}}", niche)
           .replace("{{supabase_url}}", factoryConfig.supabaseUrl)
           .replace("{{supabase_key}}", factoryConfig.supabaseKey);
 
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3-flash-latest",
           contents: [
             { role: "user", parts: [{ text: `Template Base:\n${template.content}\n\n${prompt}` }] }
           ],
@@ -241,51 +376,66 @@ AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                index_html: { type: Type.STRING },
-                landing_html: { type: Type.STRING },
+                index_html: { type: Type.STRING, description: "Landing Page Content" },
+                app_html: { type: Type.STRING, description: "Main App Content" },
                 supabase_sql: { type: Type.STRING },
                 netlify_toml: { type: Type.STRING }
               },
-              required: ["index_html", "landing_html", "supabase_sql", "netlify_toml"]
+              required: ["index_html", "app_html", "supabase_sql", "netlify_toml"]
             }
           }
         });
 
         const result = JSON.parse(response.text);
 
-        // Criar ZIP no frontend
         const zip = new JSZip();
-        zip.file("index.html", result.index_html);
-        zip.file("landing.html", result.landing_html);
+        zip.file("index.html", result.index_html); // Landing Page
+        zip.file("app.html", result.app_html);     // O Sistema SaaS
         zip.file("supabase-setup.sql", result.supabase_sql);
         zip.file("netlify.toml", result.netlify_toml);
-        zip.file("README.md", `# SaaS Factory: ${niche}\n\nGerado automaticamente para o nicho ${niche}.`);
+        zip.file("README.md", `# SaaS Factory: ${niche}\n\nGerado automaticamente para o nicho ${niche}.\n\nPara hospedar no Netlify:\n1. Crie as tabelas no Supabase usando o arquivo SQL.\n2. Arraste esta pasta para o Netlify.`);
 
         const zipBase64 = await zip.generateAsync({ type: "base64" });
 
-        // 2. Atualizar no backend
-        await fetch("/api/generations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: generationId,
-            status: "Concluído",
-            zip_base64: zipBase64
-          })
-        });
+        if (isStaticMode) {
+          setGenerations(prev => {
+            const updated = prev.map(g => g.id === generationId ? { ...g, status: "Concluído", zip_base64: zipBase64 } : g);
+            localStorage.setItem("factory_generations", JSON.stringify(updated));
+            return updated;
+          });
+        } else {
+          const updateRes = await fetch("/api/generations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: generationId, status: "Concluído", zip_base64: zipBase64 })
+          });
+          if (!updateRes.ok) throw new Error("Falha ao atualizar status no servidor");
+          await fetchGenerations();
+        }
 
       } catch (error: any) {
         console.error(`Erro no nicho ${niche}:`, error);
-        await fetch("/api/generations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: generationId,
-            status: "Erro: " + (error.message || "Falha na IA")
-          })
-        });
+        const errorMsg = error.message || "IA Error";
+        
+        if (isStaticMode) {
+          setGenerations(prev => {
+            const updated = prev.map(g => g.id === generationId ? { ...g, status: "Erro: " + errorMsg } : g);
+            localStorage.setItem("factory_generations", JSON.stringify(updated));
+            return updated;
+          });
+        } else {
+          try {
+            await fetch("/api/generations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: generationId, status: "Erro: " + errorMsg })
+            });
+            await fetchGenerations();
+          } catch (e) {
+            console.error("Falha fatal ao reportar erro ao servidor:", e);
+          }
+        }
       }
-      fetchGenerations();
     }
     
     setLoading(false);
@@ -333,14 +483,89 @@ AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração
           />
         </nav>
 
-        <div className="mt-auto p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            <span className="text-xs font-medium text-zinc-400">System Ready</span>
+        <div className="mt-auto flex flex-col gap-2">
+          <button 
+            onClick={() => setShowDeployGuide(true)}
+            className="w-full flex items-center gap-2 px-4 py-2 text-[10px] font-bold text-zinc-500 hover:text-emerald-400 transition-colors uppercase tracking-widest"
+          >
+            <Globe size={14} /> Como Hospedar?
+          </button>
+          <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`w-2 h-2 rounded-full ${isStaticMode ? "bg-yellow-500" : "bg-emerald-500 animate-pulse"}`}></div>
+              <span className="text-xs font-medium text-zinc-400">
+                {isStaticMode ? "Static Mode (Netlify)" : "Full-Stack Mode"}
+              </span>
+            </div>
+            <p className="text-[10px] text-zinc-500">
+              {isStaticMode ? "Dados salvos no seu navegador." : "Conectado ao Gemini 3.1 Pro"}
+            </p>
           </div>
-          <p className="text-[10px] text-zinc-500">Connected to Gemini 3.1 Pro</p>
         </div>
       </aside>
+
+      {/* Deploy Guide Modal */}
+      {showDeployGuide && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl max-w-2xl w-full shadow-2xl"
+          >
+            <div className="flex justify-between items-start mb-6">
+              <h2 className="text-2xl font-bold flex items-center gap-2 text-emerald-400">
+                <Globe /> Guia de Hospedagem Netlify
+              </h2>
+              <button onClick={() => setShowDeployGuide(false)} className="text-zinc-500 hover:text-white transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-6 text-zinc-300 text-sm leading-relaxed">
+              <section>
+                <h3 className="font-bold text-white mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] text-emerald-400">1</span>
+                  Para o Criador (Este Painel)
+                </h3>
+                <p>O Netlify é estático. Ao subir este projeto, ele funcionará no <b>Modo Estático</b>. Seus templates ficam salvos no seu navegador. Use a função de <b>Exportar JSON</b> em Settings para não perder seus dados.</p>
+              </section>
+              
+              <section className="bg-zinc-950 p-5 rounded-2xl border border-zinc-800">
+                <h3 className="font-bold text-white mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] text-emerald-400">2</span>
+                  Para os SaaS Gerados (O ZIP)
+                </h3>
+                <p className="mb-3">O ZIP gerado (V4) é "Plug and Play" para o Netlify:</p>
+                <ul className="space-y-2">
+                  <li className="flex gap-2">
+                    <span className="text-emerald-400 font-bold">•</span>
+                    <span><b>index.html</b>: É a sua Landing Page (Página de Vendas).</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-emerald-400 font-bold">•</span>
+                    <span><b>app.html</b>: É o Sistema SaaS real.</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-emerald-400 font-bold">•</span>
+                    <span><b>netlify.toml</b>: Garante que as rotas funcionem sem erros 404.</span>
+                  </li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="font-bold text-white mb-2">Como subir?</h3>
+                <p>Extraia o ZIP e arraste todos os arquivos para o <b>Netlify Drop</b>. Não esqueça de configurar o Supabase antes!</p>
+              </section>
+            </div>
+            <button 
+              onClick={() => setShowDeployGuide(false)}
+              className="mt-8 w-full bg-emerald-500 text-zinc-950 font-bold py-4 rounded-xl hover:bg-emerald-400 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+            >
+              Entendido, vamos lá!
+            </button>
+          </motion.div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-10">
@@ -634,6 +859,31 @@ AVISO: Se o dropdown de categorias aparecer vazio após o cadastro, a migração
               </header>
 
               <div className="space-y-8">
+                <section className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                      <Download size={20} className="text-emerald-400" />
+                      Backup de Dados (Modo Estático)
+                    </h3>
+                  </div>
+                  <p className="text-sm text-zinc-500 mb-6">
+                    Como você está usando o Netlify (Modo Estático), seus dados ficam salvos apenas neste navegador. 
+                    Exporte um backup para garantir que não perderá seus templates.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button 
+                      onClick={exportData}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                    >
+                      <Download size={18} /> Exportar Backup JSON
+                    </button>
+                    <label className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-pointer text-center">
+                      <Upload size={18} /> Importar Backup JSON
+                      <input type="file" accept=".json" onChange={importData} className="hidden" />
+                    </label>
+                  </div>
+                </section>
+
                 <section className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl">
                   <div className="flex justify-between items-center mb-6">
                     <h3 className="text-lg font-semibold flex items-center gap-2">
