@@ -1,6 +1,6 @@
-# SaaS Factory: produtos variados
+# SaaS Factory: Produtos Variados
 
-Gerado automaticamente para o nicho produtos variados.
+Gerado automaticamente para o nicho Produtos Variados.
 
 ESTRUTURA:
 - index.html: O seu Sistema (Template Base adaptado).
