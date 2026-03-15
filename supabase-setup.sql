@@ -1,20 +1,30 @@
+-- Criar tabela de categorias
 CREATE TABLE categories (
-  id SERIAL PRIMARY KEY,
-  name TEXT UNIQUE NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Criar tabela de produtos
 CREATE TABLE products (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  price NUMERIC NOT NULL,
-  category TEXT,
-  "desc" TEXT,
-  images JSONB DEFAULT '[]',
-  code TEXT,
-  stock BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT now()
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    name TEXT NOT NULL,
+    price NUMERIC NOT NULL,
+    category TEXT REFERENCES categories(name) ON UPDATE CASCADE,
+    description TEXT,
+    images JSONB DEFAULT '[]'::jsonb,
+    code TEXT,
+    stock BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Inserção de categorias padrão
-INSERT INTO categories (name) VALUES ('Utilidades'), ('Eletrônicos'), ('Decoração'), ('Presentes');
+-- Criar tabela de colaboradores
+CREATE TABLE staff (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    login TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Inserir categorias iniciais
+INSERT INTO categories (name) VALUES ('Utilidades'), ('Presentes'), ('Eletrônicos'), ('Cozinha');
